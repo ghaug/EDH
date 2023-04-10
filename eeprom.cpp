@@ -91,7 +91,7 @@ int16_t eepromFindActiveAndHealthCheck(bool doCure) {
 
 uint16_t eepromActivPtr;
 
-void eepromAdvanceActive() {
+void eepromAdvanceActive(uint8_t d1) {
   uint16_t current = eepromFindActiveAndHealthCheck(true);
   if (current == eepromLastRcord()) {
     if (eepromIsErrorRecord(0)) {
@@ -110,11 +110,7 @@ void eepromAdvanceActive() {
     }
   }
 #ifndef EEPROM_SIM_ONLY
-  EEPROM.update(eepromActivPtr, 0xFF);
-  EEPROM.update(eepromActivPtr + 2, 0xFF);
-  for (uint8_t i = 1; i < 16; i++) {
-    EEPROM.put(eepromActivPtr + i * 8 + 6, (uint16_t) 0xFFFF);
-  }
+  EEPROM.update(eepromActivPtr, d1);
   EEPROM.put(eepromActivPtr + 6, (uint16_t) 0XFFFF);
   uint16_t filler;
   EEPROM.get(current + 6, filler);
@@ -124,11 +120,10 @@ void eepromAdvanceActive() {
 }
 
 void eepromInitNext(uint8_t d1, uint8_t d2, uint8_t d3, uint8_t d4, uint8_t d5, uint8_t d6) {
-  eepromAdvanceActive();
+  eepromAdvanceActive(d1);
 #ifdef EEPROM_SIM_ONLY
  printf("eepromInitNext %02X, %02X, %02X, %02X, %02X, %02X\n", d1, d2, d3, d4, d5, d6);
 #else
-  EEPROM.update(eepromActivPtr, d1);
   EEPROM.update(eepromActivPtr + 1, d2);
   EEPROM.update(eepromActivPtr + 2, d3);
   EEPROM.update(eepromActivPtr + 3, d4);
@@ -152,6 +147,9 @@ void eepromWriteEntry(uint64_t entry, uint8_t pos) {
   printf("eepromWriteEntry %08llX at %d\n", entry, pos);
 #else
   EEPROM.put(eepromActivPtr + 8 + pos * 8, entry);
+  if (pos < 14) {
+    EEPROM.put(eepromActivPtr + 22 + pos * 8, (uint16_t) 0xFFFF);
+  }
 #endif
 }
 

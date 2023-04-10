@@ -52,6 +52,12 @@ void eepromWriteEntry(uint64_t entry, uint8_t pos) {
   if (pos == 14) eeprom_fake_cnt++;
 }
 
+
+void printOutValues(uint8_t v1, uint8_t v2, uint8_t v3, uint8_t v4, uint8_t v5, uint8_t v6) {
+    printf("%d/%d %d/%d %d/%d\n", v1, v2, v3, v4, v5, v6);
+}
+
+
 // ===================== Init =====================
 void setup() {
 
@@ -106,12 +112,7 @@ int main(int argn, char** argv) {
   int u1, u2, u3, u4, u5, u6;
   int t1, t2, t3, t4, t5, t6;
     
-  if (strcmp(argv[2], "raw") == 0) {
-    decompDumpRaw = true;
-  } else {
-    decompDumpRaw = false;
-  }
-  
+ 
   fscanf(f, "%d/%d %d/%d %d/%d", &v1, &v2, &v3, &v4, &v5, &v6);
   putData((uint8_t) v1, (uint8_t) v2, (uint8_t) v3, (uint8_t) v4, (uint8_t) v5, (uint8_t) v6);
   compressor();

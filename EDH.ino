@@ -100,6 +100,8 @@ uint8_t yellowLED = LED_BLINK;
 
 uint8_t masterMode = 0;
 
+bool decompDumpRaw = false;
+
 // ===================== Init =====================
 void setup() {
   printf("Setting up...\n");
@@ -194,7 +196,7 @@ void setup() {
     engT = tEngKalmanFilter.updateEstimate(eT);
   }
 
-  // Averages are current values
+  // Use current values as averages
   inHavg = shtIn.getHumidity();
   inTavg = shtIn.getTemperature();
   outHavg = shtOut.getHumidity();
@@ -227,10 +229,11 @@ void setup() {
 void loop() {
   uint32_t loopStartMillis = millis();
 
-  // In cas of an error we switch off pump and cooler
+  // In case of an error we switch off pump and cooler
   if (hasError(ERR_ANY)) {
     pump(false);
     cooler(false);
+    return;
   }
 
   // 10n+0: blink LEDs and read IN sensor
@@ -271,12 +274,10 @@ void loop() {
     coolT = tCoolKalmanFilter.updateEstimate(coolerTemp);
   }
   
-  // 10n+3: calculate 5 minute average and write to eeprom
-  if (loop3) {
-    ledStat = ledStat == LOW ? HIGH : LOW;
-    digitalWrite(LED_BUILTIN, ledStat);
-
-    updateAvg();
+  // 10n+3: read engine sensor
+  if (loop3 && !hasError(ERR_SEN_ENG)) {
+    float eT = readTempSen(&dsE, addrE, dataE);
+    engT = tEngKalmanFilter.updateEstimate(eT);
   }
 
   // 10n+4: run cooler PID control
@@ -312,33 +313,33 @@ void loop() {
      sm.transition();
   }
   
-  // 10n+6: read engine sensor
-  if (loop6 && !hasError(ERR_SEN_ENG)) {
-    float eT = readTempSen(&dsE, addrE, dataE);
-    engT = tEngKalmanFilter.updateEstimate(eT);
+  
+  // 10n+6: calculate 5 minute average
+  if (loop6) {
+    ledStat = ledStat == LOW ? HIGH : LOW;
+    digitalWrite(LED_BUILTIN, ledStat);
+
+    updateAvg();
+  }
+
+  // 10n+7: run the data compressor
+  if (loop7) {
+    compressor();
   }
 
   // 10n+8: dump values via RS232
   if (loop8 && contDump) {
     printShtValue(shtInStat, inT, inH, "In", '\t');
     printShtValue(shtOutStat, outT, outH, "Out", '\t');
-    printf("Cooler Temp: %.2f\t", coolT);
     printf("Eng Temp: %.2f\t", engT);
+    printf("Cooler Temp: %.2f\t", coolT);
+    printf("Cooler Pwr: %d\t", uint8_t(round(coolOutput)));
+    printf("EDH State: %d\t", sm.state());
     printf("Error: 0x%04X\n", _error);
   }
 
-  // run the data compressor
-  compressor();
-  
   // run the SHT heater state machine transition function (not used currently)
   shtHeat();
-
-  // run the RS232 command interpreter
-  uint32_t savedLoopStartMillis = loopStartMillis;
-  uint32_t commandStartMillis = millis();
-  if (readCommand()) {
-    loopStartMillis += (millis() - commandStartMillis);
-  }
 
   // 10n+9: update time counters
   if (loop9) {
@@ -352,6 +353,14 @@ void loop() {
       }
     }
   }
+
+  // run the RS232 command interpreter
+  uint32_t savedLoopStartMillis = loopStartMillis;
+  uint32_t commandStartMillis = millis();
+  if (readCommand()) {
+    loopStartMillis += (millis() - commandStartMillis);
+  }
+
   loopCnt <<= 1;
   if (loopCnt > LOOP9BIT) {
     loopCnt = LOOP0BIT;
@@ -359,12 +368,15 @@ void loop() {
   uint16_t loopActDurMillis = millis() - loopStartMillis;
   if (loopActDurMillis > loopDurationMillis) {
     printf("Overload! Next: %d This took %d\n", loopCnt, loopActDurMillis);
-  }
-  delay(loopDurationMillis - loopActDurMillis);
+    error(ERR_OVERLOAD);    
+  } else {
+    delay(loopDurationMillis - loopActDurMillis);
+  }    
 }
 
 // ===================== Tasks and helpers =====================
 
+// Update avg. and write to compressor FIFO
 void updateAvg() {
   inHsum += inH;
   inTsum += inT;
@@ -380,8 +392,17 @@ void updateAvg() {
     outTavg = outTsum / AVG_BASE;
     coolTavg = coolTsum / AVG_BASE;
     engTavg = engTsum / AVG_BASE;
+    uint8_t normCoolT;
+    if (coolTavg < 0) {
+      normCoolT = 0;
+    } else if (coolTavg > (15.0f / 4.0f)) {
+      normCoolT = 15;
+    } else {
+      normCoolT = uint8_t(round(coolTavg * 4.0f));
+    }
+    // Write to compressor FIFO
     putData(uint8_t(round(inHavg * 2.5f)), uint8_t(round((inTavg + 25.0f) * 3)), uint8_t(round(outHavg * 2.5f)), 
-            uint8_t(round((outTavg + 25.0f) * 3)), uint8_t(((_error & 0x0F) << 4) | sm.state()), uint8_t(round((engTavg + 25.0f) * 3)));
+            uint8_t(round((outTavg + 25.0f) * 3)), uint8_t((normCoolT << 4) | sm.state()), uint8_t(round((engTavg + 25.0f) * 3)));
     inHsum = 0.0f;
     inTsum = 0.0f; 
     outHsum = 0.0f;
@@ -391,6 +412,16 @@ void updateAvg() {
     avgCnt = 0;
   } else {
     avgCnt++;
+  }
+}
+
+// Called by compressor
+void printOutValues(uint8_t v1, uint8_t v2, uint8_t v3, uint8_t v4, uint8_t v5, uint8_t v6) {
+    if (decompDumpRaw) {
+    printf("%d/%d %d/%d %d/%d\n", v1, v2, v3, v4, v5, v6);
+  } else {
+    printf("In Temp/Humi: %.2f/%.2f\tOut Temp/Humi: %.2f/%.2f\tEngine Temp: %.2f Cooler Temp: %.2f State: 0x%02X\n", (v2 / 3.0f) -25.0f, v1 / 2.5f, 
+    (v4 / 3.0f) -25.0f, v3 / 2.5f, (v6 / 3.0f) -25.0f, ((v5 >> 4) & 0x0F) * 4.0f, v5 & 0x0F);
   }
 }
 
@@ -515,6 +546,7 @@ void shtHeat() {
   }
 }
 
+// Input/Output called from main state machine
 void pump(bool on) {
   if (on) {
     digitalWrite(PUMP, HIGH);
@@ -524,7 +556,6 @@ void pump(bool on) {
     yellowLED = LED_OFF;
   }
 }
-
 void cooler(bool on) {
   if (on) {
     digitalWrite(COOLER_MAINS, HIGH);
@@ -535,7 +566,6 @@ void cooler(bool on) {
     error(ERR_COOLER);
   }
 }
-
 float getInT() { return inT; }
 float getInH() { return inH; }
 float getOutT() { return outT; }
@@ -543,11 +573,13 @@ float getOutH() { return outH; }
 float getCoolT() { return coolT; }
 float getEngT() { return engT; }
 
+// Calculate dew point
 float dewPoint(float RH, float T) {
   double h = (log10(RH) - 2.0) / 0.4343 + (17.62 * T) / (243.12 + T); 
   return 243.12 * h / (17.62 - h);
 }
 
+// Commandline interface
 bool readCommand() {
     if (Serial.available()) {
     lastInByte = inByte;
@@ -652,10 +684,13 @@ bool readCommand() {
   }
 }
 
+// Throw error
+// TODO: persist in eeprom
 void error (uint32_t code) {
  _error |= code;
 }
 
+// Check for error
 bool hasError(uint32_t code) {
   return (_error & code) != 0;
 }

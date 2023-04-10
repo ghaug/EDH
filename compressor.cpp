@@ -12,6 +12,7 @@ void eepromWriteEntry(uint64_t entry, uint8_t pos);
 uint8_t eeprom_read8();
 uint16_t eeprom_read16();
 uint64_t eeprom_read64();
+void printOutValues(uint8_t v1, uint8_t v2, uint8_t v3, uint8_t v4, uint8_t v5, uint8_t v6);
 
 struct dataRecord {
   uint8_t inH;
@@ -21,9 +22,6 @@ struct dataRecord {
   uint8_t auxH;
   uint8_t auxT;
 };
-
-bool decompDumpRaw = false;
-
 
 #define DATA_BUF_MASK 0x0F
 
@@ -373,6 +371,7 @@ void compressor() {
             returnData(&compressorLast);
           }
         } else {
+
           compressorState++;
         }
       }
@@ -382,12 +381,7 @@ void compressor() {
 int16_t compVLEcode[] = {0, 1, -1, 2, -2, 3};
 
 void decompRecordOut() {
-  if (decompDumpRaw) {
-    printf("%d/%d %d/%d %d/%d\n", decompRecord.inH, decompRecord.inT, decompRecord.outH, decompRecord.outT, decompRecord.auxH, decompRecord.auxT);
-  } else {
-    printf("In Temp/Humi: %.2f/%.2f\tOut Temp/Humi: %.2f/%.2f\tAux Temp: %.2f Error: 0x%02X\n", (decompRecord.inT / 3.0f) -25.0f, decompRecord.inH / 2.5f, 
-    (decompRecord.outT / 3.0f) -25.0f, decompRecord.outH / 2.5f, (decompRecord.auxT / 3.0f) -25.0f, decompRecord.auxH);
-  }
+  printOutValues(decompRecord.inH, decompRecord.inT, decompRecord.outH, decompRecord.outT, decompRecord.auxH, decompRecord.auxT);
   decompOutput++;
 }
 
@@ -454,7 +448,7 @@ void decompressEntry() {
   decompRecord.auxH = eeprom_read8();
   decompRecord.auxT = eeprom_read8();
 
-  if (decompRecord.inH == 0xFF && decompRecord.outH == 0xFF) return;
+  if (decompRecord.inH == 0xFF) return;
   decompRecordOut();
   uint16_t filler = eeprom_read16();
   if ((filler | 0x8000) == 0xFFFF) return;
