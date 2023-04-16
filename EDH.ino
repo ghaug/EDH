@@ -17,7 +17,7 @@ uint16_t loopCnt = LOOP0BIT;
 uint8_t seconds = 0;
 uint8_t minutes = 0;
 uint16_t hours = 0;
-
+uint16_t loopMaxDurMillis = 0;
 
 uint32_t _error = 0;
 
@@ -233,6 +233,8 @@ void loop() {
   if (hasError(ERR_ANY)) {
     pump(false);
     cooler(false);
+    digitalWrite(LED_YELLOW, HIGH);
+    digitalWrite(LED_BLUE, LOW);
     return;
   }
 
@@ -366,6 +368,9 @@ void loop() {
     loopCnt = LOOP0BIT;
   }
   uint16_t loopActDurMillis = millis() - loopStartMillis;
+  if (loopActDurMillis > loopMaxDurMillis) {
+    loopMaxDurMillis = loopActDurMillis;
+  }
   if (loopActDurMillis > loopDurationMillis) {
     printf("Overload! Next: %d This took %d\n", loopCnt, loopActDurMillis);
     error(ERR_OVERLOAD);    
@@ -395,10 +400,10 @@ void updateAvg() {
     uint8_t normCoolT;
     if (coolTavg < 0) {
       normCoolT = 0;
-    } else if (coolTavg > (15.0f / 4.0f)) {
+    } else if ((coolTavg * (15.0f / 4.0f)) > 15.0f) {
       normCoolT = 15;
     } else {
-      normCoolT = uint8_t(round(coolTavg * 4.0f));
+      normCoolT = uint8_t(round(coolTavg * (15.0f / 4.0f)));
     }
     // Write to compressor FIFO
     putData(uint8_t(round(inHavg * 2.5f)), uint8_t(round((inTavg + 25.0f) * 3)), uint8_t(round(outHavg * 2.5f)), 
@@ -421,7 +426,7 @@ void printOutValues(uint8_t v1, uint8_t v2, uint8_t v3, uint8_t v4, uint8_t v5, 
     printf("%d/%d %d/%d %d/%d\n", v1, v2, v3, v4, v5, v6);
   } else {
     printf("In Temp/Humi: %.2f/%.2f\tOut Temp/Humi: %.2f/%.2f\tEngine Temp: %.2f Cooler Temp: %.2f State: 0x%02X\n", (v2 / 3.0f) -25.0f, v1 / 2.5f, 
-    (v4 / 3.0f) -25.0f, v3 / 2.5f, (v6 / 3.0f) -25.0f, ((v5 >> 4) & 0x0F) * 4.0f, v5 & 0x0F);
+    (v4 / 3.0f) -25.0f, v3 / 2.5f, (v6 / 3.0f) -25.0f, ((v5 >> 4) & 0x0F) / (15.0f / 4.0f), v5 & 0x0F);
   }
 }
 
@@ -491,6 +496,7 @@ void printShtValue(uint16_t stat, float t, float h, char* name, char term) {
   }
 }
 
+// SHT31 heat cycle state machine
 void shtHeat() {
   static float inTemp;
   static float inHumi;
@@ -562,7 +568,7 @@ void cooler(bool on) {
     blueLED = LED_ON;
   } else {
     digitalWrite(COOLER_MAINS, LOW);
-    blueLED = LED_BLINK;
+    blueLED = LED_OFF;
     error(ERR_COOLER);
   }
 }
@@ -594,7 +600,7 @@ bool readCommand() {
           printf("c: clean eeprom (master mode only)\n");
           printf("d: dump logged values\n");
           printf("e: dump eeprom\n");
-          printf("f: force heat cycle\n");
+          printf("f: force heat cycle (master mode only)\n");
           printf("h: print this\n");
           printf("m: enter master mode for five seconds\n");
           printf("p: print probe data\n");
@@ -613,12 +619,23 @@ bool readCommand() {
           if (masterMode != 0) {
             printf("Cleaning eeprom\n");            
             eepromInitAll();
+            printf("Done\n>");
+            return true;
           } else {
             printf("Not in master mode!\n");
           }
         break;      
         case 'f':
-          if (heatCycle == 0) heatCycle = 1;
+          if (masterMode != 0) {
+            if (heatCycle == 0) {
+              heatCycle = 1;
+              printf("Starting heat cycle\n");
+            } else {
+              printf("Heat cycle already in progress\n");
+            }
+          } else {
+            printf("Not in master mode!\n");
+          }
         break;      
         case 'p':
           printf("In Stat: 0x%X   Out Stat: 0x%X\n", shtInStat, shtOutStat);
@@ -636,7 +653,7 @@ bool readCommand() {
             eepromSetReadPtr(ptr);            
           }
           printf("Done\n>");
-          return true;          
+          return true;
         break;
         case 'r':
           printf("Dumping loged values\n");
@@ -672,10 +689,26 @@ bool readCommand() {
         case 's':
           printf("Status:\n");
           printf("Uptime %d:%02d:%02d\n", hours, minutes, seconds);
-          printf("Error: 0x%X\n", _error);
           printf("Max I2C read: %dus\n", shtMaxReadMicros);
+          printf("Max loop duration: %dms\n", loopMaxDurMillis);
           printf("SHT error: 0x%X\n", shtError);
           printf("Heat cycle: %d\n", heatCycle);
+          uint8_t ne = eepromNumberOfErrors();
+          if (ne == 0) {
+            printf("No stored errors\n");
+          } else {
+            printf("Stored errors:\n");
+            for (uint8_t i = 0; i < ne; i++) {
+              uint8_t code;
+              uint16_t hours;
+              uint8_t minutes;
+              uint8_t seconds;
+              eepromGetError(i, &code, &hours, &minutes, &seconds);
+              if (code != 0xFF) {
+                printf("After %d:%02d:%02d Error 0x%lX\n", hours, minutes, seconds, 1 << code);
+              }
+            }
+          }
         break;
       }
       printf(">");
@@ -685,9 +718,16 @@ bool readCommand() {
 }
 
 // Throw error
-// TODO: persist in eeprom
 void error (uint32_t code) {
- _error |= code;
+  if (code == 0) return;
+  _error |= code;
+  uint8_t n = 1;
+  if ((code & 0x0000FFFF) == 0) {n = n +16; code = code >>16;}
+  if ((code & 0x000000FF) == 0) {n = n + 8; code = code >> 8;}
+  if ((code & 0x0000000F) == 0) {n = n + 4; code = code >> 4;}
+  if ((code & 0x00000003) == 0) {n = n + 2; code = code >> 2;}
+  code = n - (code & 1);
+  eepromAddError(code, hours, minutes, seconds);
 }
 
 // Check for error

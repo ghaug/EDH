@@ -130,5 +130,149 @@ int main(int argn, char** argv) {
     printf("Read didn't work (11)\n");
     return 1;
   }
+
+
+  _eeprom[0] = 0x00;
+
+  if (eepromNumberOfErrors() != 0) {
+    printf("There should be no error records!\n");
+    return 1;
+  }
+
+  eepromAddError(1, 2, 3, 4);
+
+  if (eepromNumberOfErrors() != 1) {
+    printf("There should be one error not %d!\n", eepromNumberOfErrors());
+    return 1;
+  }
+
+  uint8_t c, m, s;
+  uint16_t h;
+
+  eepromGetError(0, &c, &h, &m, &s);
+
+  if (c != 1 || h != 2 || m != 3 || s != 4) {
+    printf("Error not as expected!\n");
+    return 1;
+  }
+
+  eepromAddError(5, 40000, 55, 55);
+
+  eepromGetError(0, &c, &h, &m, &s);
+
+  if (c != 1 || h != 2 || m != 3 || s != 4) {
+    printf("Error not as expected!\n");
+    return 1;
+  }
+
+  eepromGetError(1, &c, &h, &m, &s);
+
+  if (c != 5 || h != 40000 || m != 55 || s != 55) {
+    printf("Error not as expected!\n");
+    return 1;
+  }
+
+  for (int i = 0; i < 26; i++) {
+    eepromAddError(i, 1, 8, 5);
+  }
+
+  if (eepromNumberOfErrors() != 25) {
+    printf("There should be 25 errors not %d!\n", eepromNumberOfErrors());
+    return 1;
+  }
+
+
+  eepromGetError(0, &c, &h, &m, &s);
+
+  if (c != 1) {
+    printf("Error not 1 as expected!\n");
+    return 1;
+  }
+
+  eepromGetError(1, &c, &h, &m, &s);
+
+  if (c != 2) {
+    printf("Error not 2 as expected!\n");
+    return 1;
+  }
+
+
+  eepromGetError(20, &c, &h, &m, &s);
+  if (c != 21) {
+    printf("Error not 21 as expected!\n");
+    return 1;
+  }
+
+
+  eepromGetError(21, &c, &h, &m, &s);
+  if (c != 22) {
+    printf("Error not 22 as expected!\n");
+    return 1;
+  }
+
+  eepromGetError(22, &c, &h, &m, &s);
+
+  if (c != 23) {
+    printf("Error %d not 23 as expected!\n", c);
+    return 1;
+  }
+
+  eepromGetError(24, &c, &h, &m, &s);
+
+  if (c != 25) {
+    printf("Error %d not 25 as expected!\n", c);
+    return 1;
+  }
+
+  _eeprom[0x180] = 0x00;
+
+  for (int i = 0; i < 49; i++) {
+    eepromAddError(i, 1, 8, 5);
+  }
+
+
+  eepromGetError(0, &c, &h, &m, &s);
+
+  if (c != 24) {
+    printf("Error %d not 24 as expected!\n", c);
+    return 1;
+  }
+
+  eepromGetError(1, &c, &h, &m, &s);
+
+  if (c != 25) {
+    printf("Error %d not 25 as expected!\n", c);
+    return 1;
+  }
+
+
+  _eeprom[0x180] = 0x00;
+
+  for (int i = 0; i < 50; i++) {
+    eepromAddError(i, 1, 8, 5);
+  }
+
+
+  eepromGetError(0, &c, &h, &m, &s);
+
+  if (c != 25) {
+    printf("Error %d not 25 as expected!\n", c);
+    return 1;
+  }
+
+  eepromGetError(1, &c, &h, &m, &s);
+
+  if (c != 26) {
+    printf("Error %d not 26 as expected!\n", c);
+    return 1;
+  }
+
+  eepromGetError(24, &c, &h, &m, &s);
+
+  if (c != 49) {
+    printf("Error %d not 49 as expected!\n", c);
+    return 1;
+  }
+
   return 0;
 }

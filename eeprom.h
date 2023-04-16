@@ -16,5 +16,8 @@ uint16_t eepromCapacityInRecords();
 uint8_t eeprom_read8();
 uint16_t eeprom_read16();
 uint64_t eeprom_read64();
+void eepromAddError(uint8_t code, uint16_t hours, uint8_t minutes, uint8_t seconds);
+uint8_t eepromNumberOfErrors();
+void eepromGetError(uint8_t idx, uint8_t* code, uint16_t* hours, uint8_t* minutes, uint8_t* seconds);
 
 #endif // EDH_EEPROM_H

@@ -35,6 +35,81 @@ uint16_t eepromLastRcord() {
   return EEPROM.length() - sizeof(compressorRecord);
 }
 
+int16_t eepromFindErrorRecord() {
+  for (int16_t ptr = 0; ptr < EEPROM.length(); ptr += sizeof(compressorRecord)) {
+    if (eepromIsErrorRecord(ptr)) {
+      return ptr;
+    }
+  }
+  return -1;
+}
+
+int16_t eepromFindOrCreateErrorRecord() {
+  int16_t ptr = eepromFindErrorRecord();
+  if (ptr != -1) {
+    return ptr;
+  }
+  ptr = eepromFindActiveAndHealthCheck(false);
+  if (ptr == -1 || ptr == eepromLastRcord()) {
+    ptr = 0;
+  } else {
+    ptr += sizeof(compressorRecord);
+  }
+  EEPROM.write(ptr, 0xFE);
+  for (uint8_t i = 1; i < sizeof(compressorRecord); i += 5) {
+    EEPROM.write(ptr + i, 0xFF);
+  }
+  return ptr;
+}
+
+void eepromAddError(uint8_t code, uint16_t hours, uint8_t minutes, uint8_t seconds) {
+  int16_t ptr = eepromFindOrCreateErrorRecord();
+  uint8_t i;
+  for (i = 1; i < (sizeof(compressorRecord) - 5) && (EEPROM.read(ptr + i) & 0x80) != 0x80; i += 5) ;
+  EEPROM.write(ptr + i++, code);
+  EEPROM.put(ptr + i, hours);
+  i += 2;
+  EEPROM.update(ptr + i++, minutes);
+  EEPROM.update(ptr + i++, seconds);
+  if ((i + 5) >  sizeof(compressorRecord)) {
+    i = 1;
+  }
+  EEPROM.update(ptr + i, EEPROM.read(ptr + i) | 0x80);
+}
+
+uint8_t eepromNumberOfErrors() {
+  int16_t ptr = eepromFindErrorRecord();
+  if (ptr == -1) {
+    return 0;
+  }
+  uint8_t cnt = 0;
+  for (uint8_t i = 1; i <= (sizeof(compressorRecord) - 5) && EEPROM.read(ptr + i) != 0xFF; i += 5) {
+    cnt++;
+  }
+  return cnt;
+}
+
+void eepromGetError(uint8_t idx, uint8_t* code, uint16_t* hours, uint8_t* minutes, uint8_t* seconds) {
+  *code = 0xFF;
+  int16_t ptr = eepromFindErrorRecord();
+  if (ptr == -1) return;
+  uint8_t i;
+  for (i = 1; (EEPROM.read(ptr + i) & 0x80) != 0x80; i += 5) ;
+  if ((i + 10) < (sizeof(compressorRecord)) && EEPROM.read(ptr + i + 5) == 0xFF) {
+    i = 1;
+  }
+  int16_t p = i + idx * 5;
+  if (p > (sizeof(compressorRecord) - 5)) {
+    p = p - (sizeof(compressorRecord)  / 5) * 5;
+  }
+  ptr += p;
+  *code = EEPROM.read(ptr++) & 0x7F;
+  EEPROM.get(ptr, *hours);
+  ptr += 2;
+  *minutes = EEPROM.read(ptr++);
+  *seconds = EEPROM.read(ptr);
+}
+
 int16_t eepromFindActiveAndHealthCheck(bool doCure) {
   int16_t p[3];
   uint8_t c = 0;
