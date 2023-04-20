@@ -34,7 +34,7 @@ void edhSM::transition() {
         // Pause if engine temp is below out dew point plus minimum delta
         _state = STATE_PAUSE_ENG_BELOW_DEWP;
         _minTemp = _eT();
-      } else if ((_outH() >= _inH() && _inH() > 30.0f) || _outH() > maxHumi) {
+      } else if (_outH() > maxHumi) {
         // Pause if out humi > in humi or out humi is above maximum
         _state = STATE_PAUSE_HUMI_HI;
         _minTemp = inT;
